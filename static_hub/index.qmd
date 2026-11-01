@@ -1,0 +1,352 @@
+---
+title: "LUKB Investment Office – Markt- & Konjunkturüberblick"
+format: html
+---
+
+```{r}
+#| label: setup-and-load-json
+#| include: false
+
+suppressPackageStartupMessages({
+  library(htmltools)
+  library(jsonlite)
+})
+
+# Lade Datenbank-Layer direkt aus dem autarken Deployment-Ordner (static_hub/R/)
+local_r_file <- if (file.exists("R/db_connection.R")) "R/db_connection.R" else "../R_shared/db_connection.R"
+source(local_r_file)
+
+payload <- load_hub_payload()
+build_ts <- format(Sys.time(), "%d.%m.%Y, %H:%M Uhr")
+```
+
+```{r}
+#| label: render-editorial-hub
+#| results: asis
+
+# Hilfsfunktionen für Formatierung (inkl. Zins-Spannen-Erkennung wie "3.75-4%")
+fmt_num <- function(x, digits = 2) {
+  v <- as.numeric(x)
+  if (is.na(v)) return("–")
+  sprintf(paste0("%.", digits, "f"), v)
+}
+
+fmt_bp_delta <- function(curr, target) {
+  c_val <- parse_rate_midpoint(curr)
+  t_val <- parse_rate_midpoint(target)
+  if (is.na(c_val) || is.na(t_val)) return(tags$span(class = "delta-badge delta-flat", "–"))
+  bp <- round((t_val - c_val) * 100, 0)
+  cls <- if (bp > 0) "delta-pos" else if (bp < 0) "delta-neg" else "delta-flat"
+  sign_str <- if (bp > 0) "+" else ""
+  tags$span(class = paste("delta-badge", cls), paste0(sign_str, bp, " Bp."))
+}
+
+stance_labels <- c(
+  "-2" = "Stark untergewichtet",
+  "-1" = "Untergewichtet",
+  "0"  = "Neutral",
+  "1"  = "Übergewichtet",
+  "2"  = "Stark übergewichtet"
+)
+
+change_labels <- c(
+  "-1" = "↓ Abgestuft",
+  "0"  = "→ Unverändert",
+  "1"  = "↑ Hochgestuft"
+)
+
+render_stance_dots <- function(s_val) {
+  s <- as.integer(s_val)
+  key <- as.character(s)
+  lbl <- if (key %in% names(stance_labels)) stance_labels[[key]] else "Neutral"
+
+  dots <- lapply(c(-2L, -1L, 0L, 1L, 2L), function(v) {
+    is_act <- (v == s)
+    bg <- if (!is_act) {
+      "#CBD5E1"
+    } else if (v == -2L) {
+      "#B91C1C"
+    } else if (v == -1L) {
+      "#D97706"
+    } else if (v == 0L) {
+      "#475569"
+    } else if (v == 1L) {
+      "#0066B3"
+    } else {
+      "#003366"
+    }
+    sz <- if (is_act) "12px" else "8px"
+    tags$span(style = sprintf("display:inline-block; width:%s; height:%s; border-radius:50%%; background:%s;", sz, sz, bg))
+  })
+
+  tags$div(
+    style = "display:flex; align-items:center; gap:0.65rem;",
+    tags$div(class = "stance-dots", dots),
+    tags$span(style = "font-weight:600; font-size:0.81rem;", lbl)
+  )
+}
+
+# 1. HEADER MIT TAB-LINKS
+header_el <- tags$header(
+  class = "pub-topbar",
+  tags$div(
+    class = "pub-topbar-inner",
+    tags$div(
+      class = "pub-brand",
+      tags$div(class = "pub-monogram", "LUKB"),
+      tags$div(
+        class = "pub-title-group",
+        tags$span("Luzerner Kantonalbank · Investment Office"),
+        tags$h1("Zentralbanken, Makroökonomie & Taktische Allokation")
+      )
+    ),
+    tags$nav(
+      class = "pub-nav",
+      tags$a(href = "#", class = "active", `data-pub-tab` = "cb", "01 · Zentralbankprognosen"),
+      tags$a(href = "#", `data-pub-tab` = "macro", "02 · Makroprognosen"),
+      tags$a(href = "#", `data-pub-tab` = "alloc", "03 · Allokation & Prognosen")
+    ),
+    tags$div(
+      class = "pub-meta-pill",
+      paste0("Stichtag: ", payload$meta$committee_date %||% "-", " · v", payload$meta$version %||% 1)
+    )
+  )
+)
+
+# TAB-LEISTE IM HAUPTBEREICH
+tabs_bar_el <- tags$div(
+  class = "pub-tabs-bar",
+  tags$button(type = "button", class = "pub-tab-btn active", `data-pub-tab` = "cb", "01 · Zentralbankprognosen (SNB, Fed, EZB, BoE, BoJ)"),
+  tags$button(type = "button", class = "pub-tab-btn", `data-pub-tab` = "macro", "02 · Makroprognosen (Wachstum & Inflation)"),
+  tags$button(type = "button", class = "pub-tab-btn", `data-pub-tab` = "alloc", "03 · Allokationstabelle mit 12M-Prognosen")
+)
+
+# 2. SEKTION 1: ZENTRALBANKPROGNOSEN (Spannen-Support & bedingte Kommentarspalte)
+cb_has_comments <- has_any_row_comment(payload$central_banks$rows)
+
+cb_rows <- lapply(payload$central_banks$rows, function(r) {
+  tags$tr(
+    tags$td(
+      tags$span(class = "code-badge", r$currency),
+      tags$strong(r$name),
+      tags$span(style = "color:#64748B; font-size:0.79rem; margin-left:0.45rem;", r$full_name %||% "")
+    ),
+    tags$td(class = "num", style = "font-weight:600;", format_rate_display(r$current, 2)),
+    tags$td(class = "num", style = "font-weight:600;", format_rate_display(r$m3, 2)),
+    tags$td(class = "num", fmt_bp_delta(r$current, r$m3)),
+    tags$td(class = "num", style = "font-weight:700; color:#003366;", format_rate_display(r$m12, 2)),
+    tags$td(class = "num", fmt_bp_delta(r$current, r$m12)),
+    if (cb_has_comments) tags$td(style = "color:#334155;", r$comment %||% "")
+  )
+})
+
+sec_cb_el <- tags$section(
+  id = "sec-central-banks",
+  class = "editorial-card pub-tab-pane",
+  `data-pane-key` = "cb",
+  tags$div(
+    class = "editorial-card-head",
+    tags$div(
+      tags$span(class = "editorial-kicker", "Sektion 01 · Geldpolitik & Zinsausblick"),
+      tags$h2(class = "editorial-heading", "Zentralbankprognosen (SNB, Fed, EZB, BoE, BoJ)")
+    ),
+    tags$div(style = "font-size:0.78rem; color:#64748B;", "Angaben in % p.a. (Einzelwert oder Zielband) · Veränderungen in Basispunkten (Bp.)")
+  ),
+  tags$div(
+    class = "editorial-card-body",
+    tags$div(
+      class = "ed-table-wrap",
+      tags$table(
+        class = "ed-table",
+        tags$thead(
+          tags$tr(
+            tags$th(style = if (cb_has_comments) "width:28%;" else "width:38%;", "Zentralbank / Leitzins"),
+            tags$th(class = "num", style = "width:12%;", "Aktuell"),
+            tags$th(class = "num", style = "width:12%;", "In 3M"),
+            tags$th(class = "num", style = "width:11%;", "Δ 3M (Bp.)"),
+            tags$th(class = "num", style = "width:12%;", "In 12M"),
+            tags$th(class = "num", style = "width:11%;", "Δ 12M (Bp.)"),
+            if (cb_has_comments) tags$th(style = "width:14%;", "Kommentar")
+          )
+        ),
+        tags$tbody(cb_rows)
+      )
+    ),
+    tags$div(
+      class = "ed-commentary",
+      tags$div(class = "ed-commentary-kicker", "Gesamtkommentar des Ökonomen · Geldpolitik"),
+      tags$div(payload$central_banks$commentary %||% "")
+    )
+  )
+)
+
+# 3. SEKTION 2: MAKROPROGNOSEN (Wachstum & Inflation für t-1, t, t+1 + bedingte Kommentarspalte)
+base_yr <- as.integer(payload$macro$base_year %||% format(Sys.Date(), "%Y"))
+y_prev <- base_yr - 1L
+y_curr <- base_yr
+y_next <- base_yr + 1L
+macro_has_comments <- has_any_row_comment(payload$macro$rows)
+
+macro_rows <- lapply(payload$macro$rows, function(r) {
+  tags$tr(
+    class = "macro-country-row",
+    `data-code` = r$code,
+    tags$td(
+      tags$span(class = "code-badge", r$code),
+      tags$strong(r$country)
+    ),
+    tags$td(class = "num", style = "border-left:1px solid #E2DFD7; color:#475569;", paste0(fmt_num(r$gdp_t_minus_1, 1), " %")),
+    tags$td(class = "num", style = "background:#FAF9F5; font-weight:700; color:#003366;", paste0(fmt_num(r$gdp_t, 1), " %")),
+    tags$td(class = "num", style = "font-weight:600;", paste0(fmt_num(r$gdp_t_plus_1, 1), " %")),
+    tags$td(class = "num", style = "border-left:1px solid #CBD5E1; color:#475569;", paste0(fmt_num(r$cpi_t_minus_1, 1), " %")),
+    tags$td(class = "num", style = "background:#FAF9F5; font-weight:700; color:#003366;", paste0(fmt_num(r$cpi_t, 1), " %")),
+    tags$td(class = "num", style = "font-weight:600;", paste0(fmt_num(r$cpi_t_plus_1, 1), " %")),
+    if (macro_has_comments) tags$td(style = "border-left:1px solid #CBD5E1; color:#334155;", r$comment %||% "")
+  )
+})
+
+sec_macro_el <- tags$section(
+  id = "sec-macro",
+  class = "editorial-card pub-tab-pane",
+  `data-pane-key` = "macro",
+  style = "display:none;",
+  tags$div(
+    class = "editorial-card-head",
+    tags$div(
+      tags$span(class = "editorial-kicker", "Sektion 02 · Konjunktur & Teuerung"),
+      tags$h2(class = "editorial-heading", paste0("Makroprognosen für Wachstum und Inflation (", y_prev, "–", y_next, "E)"))
+    ),
+    tags$div(
+      style = "display:flex; align-items:center; gap:0.5rem;",
+      tags$span(
+        style = "background:#FBF6E8; border:1px solid #E5D090; color:#5C4509; font-size:0.78rem; font-weight:600; padding:0.3rem 0.7rem; border-radius:6px;",
+        paste0("Prognose-Basisjahr t = ", y_curr, "  (t-1 = ", y_prev, " | t = ", y_curr, "E | t+1 = ", y_next, "E)")
+      )
+    )
+  ),
+  tags$div(
+    class = "editorial-card-body",
+    tags$div(
+      class = "ed-table-wrap",
+      tags$table(
+        class = "ed-table",
+        tags$thead(
+          tags$tr(
+            tags$th(rowspan = "2", style = if (macro_has_comments) "width:18%; vertical-align:bottom;" else "width:24%; vertical-align:bottom;", "Land / Wirtschaftsraum"),
+            tags$th(colspan = "3", class = "group-th", "Reales BIP-Wachstum (J/J in %)"),
+            tags$th(colspan = "3", class = "group-th", "Inflation / Konsumentenpreise (J/J in %)"),
+            if (macro_has_comments) tags$th(rowspan = "2", style = "width:22%; vertical-align:bottom; border-left:1px solid #CBD5E1;", "Kommentar")
+          ),
+          tags$tr(
+            tags$th(class = "num", style = "border-left:1px solid #E2DFD7;", paste0(y_prev, " (t-1)")),
+            tags$th(class = "num", style = "background:#EFECE4; color:#003366;", paste0(y_curr, "E (t)")),
+            tags$th(class = "num", paste0(y_next, "E (t+1)")),
+            tags$th(class = "num", style = "border-left:1px solid #CBD5E1;", paste0(y_prev, " (t-1)")),
+            tags$th(class = "num", style = "background:#EFECE4; color:#003366;", paste0(y_curr, "E (t)")),
+            tags$th(class = "num", paste0(y_next, "E (t+1)"))
+          )
+        ),
+        tags$tbody(macro_rows)
+      )
+    ),
+    tags$div(
+      class = "ed-commentary",
+      tags$div(class = "ed-commentary-kicker", "Gesamtkommentar Makroökonomie"),
+      tags$div(payload$macro$commentary %||% "")
+    )
+  )
+)
+
+# 4. SEKTION 3: ALLOKATIONSTABELLE MIT PROGNOSEN (+ bedingte Kommentarspalte)
+alloc_has_comments <- has_any_row_comment(payload$allocation$rows)
+
+alloc_rows <- lapply(payload$allocation$rows, function(r) {
+  chg_key <- as.character(as.integer(r$change %||% 0))
+  chg_lbl <- if (chg_key %in% names(change_labels)) change_labels[[chg_key]] else "→ Unverändert"
+  chg_col <- if (chg_key == "1") "#0F766E" else if (chg_key == "-1") "#B45309" else "#475569"
+
+  fc_val <- as.numeric(r$forecast_12m %||% 0)
+  fc_cls <- if (fc_val > 0) "delta-pos" else if (fc_val < 0) "delta-neg" else "delta-flat"
+  fc_str <- paste0(if (fc_val > 0) "+" else "", fmt_num(fc_val, 1), " %")
+
+  tags$tr(
+    tags$td(tags$strong(r$asset_class)),
+    tags$td(render_stance_dots(r$stance)),
+    tags$td(style = sprintf("font-weight:600; font-size:0.8rem; color:%s;", chg_col), chg_lbl),
+    tags$td(class = "num", tags$span(class = paste("delta-badge", fc_cls), fc_str)),
+    if (alloc_has_comments) tags$td(style = "color:#334155;", r$comment %||% "")
+  )
+})
+
+sec_alloc_el <- tags$section(
+  id = "sec-allocation",
+  class = "editorial-card pub-tab-pane",
+  `data-pane-key` = "alloc",
+  style = "display:none;",
+  tags$div(
+    class = "editorial-card-head",
+    tags$div(
+      tags$span(class = "editorial-kicker", "Sektion 03 · Taktische Anlagepolitik"),
+      tags$h2(class = "editorial-heading", "Allokationstabelle mit 12M-Prognosen")
+    ),
+    tags$div(style = "font-size:0.78rem; color:#64748B;", "Skala: Stark untergewichtet (--) bis Stark übergewichtet (++)")
+  ),
+  tags$div(
+    class = "editorial-card-body",
+    tags$div(
+      class = "ed-table-wrap",
+      tags$table(
+        class = "ed-table",
+        tags$thead(
+          tags$tr(
+            tags$th(style = "width:16%;", "Haupt-Assetklasse"),
+            tags$th(style = "width:28%;", "Aktuelle Empfehlung"),
+            tags$th(style = "width:13%;", "Veränderung"),
+            tags$th(class = "num", style = "width:13%;", "Prognose 12M"),
+            if (alloc_has_comments) tags$th(style = "width:30%;", "Kommentar")
+          )
+        ),
+        tags$tbody(alloc_rows)
+      )
+    ),
+    tags$div(
+      class = "ed-commentary",
+      tags$div(class = "ed-commentary-kicker", "Gesamtkommentar Anlageallokation"),
+      tags$div(payload$allocation$commentary %||% "")
+    )
+  )
+)
+
+# 5. FOOTER + EINGEBETTETES JSON-DOKUMENT
+raw_json_str <- as.character(jsonlite::toJSON(payload, auto_unbox = TRUE))
+
+footer_el <- tags$footer(
+  class = "pub-footer",
+  tags$div(
+    style = "max-width:1320px; margin:0 auto; display:flex; justify-content:space-between; flex-wrap:wrap; gap:1rem;",
+    tags$div(
+      tags$strong(style = "color:#FFFFFF;", "Luzerner Kantonalbank AG – Investment Office"),
+      tags$div("Statische HTML/JS Informationsseite · Generiert via Quarto auf Posit Connect (ohne Login zugänglich)")
+    ),
+    tags$div(
+      style = "text-align:right;",
+      tags$div(paste0("Stand des Builds: ", build_ts, " · Dokument-Version: v", payload$meta$version %||% 1)),
+      tags$div("Rechtlicher Hinweis: Ausschliesslich zu Informationszwecken.")
+    )
+  ),
+  tags$script(id = "lukb-io-hub-json", type = "application/json", HTML(raw_json_str)),
+  tags$script(src = "assets/js/hub_interactivity.js")
+)
+
+htmltools::tagList(
+  header_el,
+  tags$main(
+    class = "pub-container",
+    tabs_bar_el,
+    sec_cb_el,
+    sec_macro_el,
+    sec_alloc_el
+  ),
+  footer_el
+)
+```

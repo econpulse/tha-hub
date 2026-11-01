@@ -1,0 +1,24 @@
+# History and user files
+.Rhistory
+.RData
+.Ruserdata
+.Rproj.user/
+
+# Local databases & logs
+data/*.sqlite
+data/*.sqlite-journal
+data/*.db
+*.log
+
+# Quarto temporary render caches
+.quarto/
+*_cache/
+*_files/
+static_hub/.quarto/
+static_hub/index_files/
+
+# OS / Editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

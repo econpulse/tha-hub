@@ -1,0 +1,24 @@
+project:
+  type: default
+
+format:
+  html:
+    theme:
+      - cosmo
+      - custom.scss
+    toc: false
+    page-layout: custom
+    embed-resources: false
+    minimal: false
+    smooth-scroll: true
+    include-in-header:
+      - text: |
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <link rel="preconnect" href="https://fonts.googleapis.com">
+          <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+          <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600;700&family=Newsreader:opsz,wght@6..72,500;6..72,600&display=swap" rel="stylesheet">
+
+execute:
+  echo: false
+  warning: false
+  message: false
